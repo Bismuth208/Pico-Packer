@@ -1,9 +1,9 @@
 /+
  + Author: Antonov Alexander (Bismuth208)
  + Date: 12 november 2017
- + Last edit: 19 april 2018
+ + Last edit: 22 april 2018
  + Lang: D
- + Compiler: DMD v2.078.1
+ + Compiler: DMD v2.079.1
  +
  + This tool convert and compress indexed (or not) ".png" files
  + by simple RLE and tiny dictionary (like LZ family) to ".h" files.
@@ -14,7 +14,7 @@
 import arsd.color;
 import arsd.png;
 
-immutable auto infoText = "\nPico Packer. Ver. 0.4";
+immutable auto infoText = "\nPico Packer. v0.5. Build: " ~ __TIMESTAMP__;
 immutable auto fmtSize = "// Old size %d * 2 = %d\n// New size = %d + 2\n// Compress ratio %f\n";
 immutable auto fmt = "pic_t %s[] PROGMEM = {\n  0x%.2x,0x%.2x, // width and height";
 
@@ -32,12 +32,14 @@ immutable auto maxDictSize = 0x2d;
 ubyte dictSize = maxDictSize;
 
 /** Which pack to use; V3 needs more RAM on unpack.
-  Where are 3 versions:
+  Where are 4 versions:
+    v0 - only raw data (converted png to rgb565).
     v1 - simple RLE, whith no dictionary used.
     v2 - more strict rules, proveide less compression, also sometimes work better...
     v3 - is much more relaxed, on unpack may reque a lot of RAM.
 */
-auto compressRatioVersion = 3;
+enum compressVersion { V0, V1, V2, V3 }
+auto compressVersionCurrent = cast(int)compressVersion.V3;
 
 /** Palette used to make indexed pictures.
   Colors are represented in RGB565 color space,
@@ -96,15 +98,15 @@ auto findMatch(ref ubyte[] buf) {
   auto matchCountMax = buf.count(buf[0..2]);
 
   while(!allMatchFound) {
-    if(compressRatioVersion == 3) {  // v3
+    if(compressVersionCurrent == compressVersion.V3) {
       ++offset;
-    } else { // v2
+    } else {      
       do {
         ++offset;
-      } while(((buf[offset] >= dictPosMarker) || (buf[offset+1] >= dictPosMarker)) && (offset < buf.length-1));
+      } while(((buf[offset] >= dictPosMarker) || (buf[offset+1] >= dictPosMarker)) && (offset < buf.length-2));
     }
-  
-    if(offset < buf.length-1) {
+
+    if(offset < buf.length-2) {
       matchCount = buf[offset..$].count(buf[offset..offset+2]);
 
       if(matchCount > matchCountMax) {
@@ -141,7 +143,7 @@ auto encodeMatches(ref ubyte[] buf) {
   } while((tmpDict.length) && (dictPos < dictSize));
   
   // size of dictionary offset
-  dictionaryArr[0] = cast(ubyte)(dictionaryArr.length ? dictionaryArr.length+1 : 0x00);
+  dictionaryArr[0] = cast(ubyte)(dictionaryArr.length+1);
   return dictionaryArr;
 }
 
@@ -180,7 +182,6 @@ auto compressRLE(ref ubyte[] buf) {
     }
   }
 
-  encodedRLE.write(cast(ubyte)pictureEndMarker);
   return encodedRLE.toBytes;
 }
 
@@ -204,19 +205,15 @@ auto transcodePNG(ref string fileName) {
   PicoPic pic;
   pic.width = img.width;
   pic.height = img.height;
+  pic.data = new ubyte[img.width * img.height];
 
   // it's veeery slow, in future i'll make something whith it...
-  for(int n=0; n < img.height; n++) {
-    for(int m=0; m < img.width; m++) {
-      pixel = img.getPixel(m, n);
+  for(int y=0; y < pic.height; y++) {
+    for(int x=0; x < pic.width; x++) {
+      pixel = img.getPixel(cast(int)x, cast(int)y);
       indexColor = pixel.colorTo565;
       isIndexed = cast(int)palette_ext.countUntil(indexColor);
-
-      if(isIndexed) {
-        pic.data ~= cast(ubyte)isIndexed;
-      } else {
-        pic.data ~= findNearestColor(rgbaPalette, pixel);
-      }
+      pic.data.ptr[y*pic.width+x] = isIndexed ? cast(ubyte)isIndexed : findNearestColor(rgbaPalette, pixel);
     }
   }
   return pic;
@@ -237,13 +234,16 @@ void fillHeader(ref string fileName) {
     foreach(i, ref pArr; refArr) arrayEnd.writef("%s0x%.2x,", (!(i % sep) ? "\n  " : ""), pArr);
   };
 
-  array.data = array.data.compressRLE;
-  if(compressRatioVersion == 1) { // only RLE
-    dictionaryArr[0] = 0x02; // empty dictionary
-  } else { // v2,v3
-    dictionaryArr = array.data.encodeMatches;
+  dictionaryArr[0] = 0x02; // empty dictionary
+
+  if(compressVersionCurrent > compressVersion.V0) {
+    array.data = array.data.compressRLE;
+    if(compressVersionCurrent > compressVersion.V1) { // v2,v3
+      dictionaryArr = array.data.encodeMatches;
+    }
   }
-  
+
+  array.data ~= cast(ubyte)pictureEndMarker;
   pictureSize = dictionaryArr.length + array.data.length;
   
   arrayEnd.writef(fmtSize, bufSize, bufSize*2, pictureSize, cast(float)(bufSize)/cast(float)pictureSize);
@@ -268,14 +268,15 @@ void createPalette() {
   import std.stdio;
 
   Color pixel;
+  rgbaPalette = new Color[palette_ext.length];
 
   "Creating palette... ".write;
-  foreach(id; palette_ext) {
+  foreach(i, ref id; palette_ext) {
     pixel.r = (id >> 8) & 0xF8;
     pixel.g = (id >> 4) & 0x7E;
     pixel.b = (id & 0x1F);
 
-    rgbaPalette ~= pixel;
+    rgbaPalette[i] = pixel;
   }
   "Done!".writeln;
 }
@@ -286,7 +287,7 @@ auto pareArguments(ref string[] args, ref string fileName) {
 
   auto ok = true;
   auto newDictSize = cast(ubyte)maxDictSize;
-  auto rslt = getopt(args, "level|l", "Select compression level: 1-3", &compressRatioVersion,
+  auto rslt = getopt(args, "level|l", "Select compression level: 0-3", &compressVersionCurrent,
                            "dict|d", "Select dictionary size. min: 0, max: 46", &newDictSize,
                            "file|f", "Select single *.png file to convert.", &fileName);
 
@@ -297,13 +298,17 @@ auto pareArguments(ref string[] args, ref string fileName) {
     if(newDictSize != dictSize) {
       dictSize = newDictSize;
       if(dictSize == 0) {
-        compressRatioVersion = 1; // only RLE
+        compressVersionCurrent = compressVersion.V1; // only RLE
       } else {
-        --dictSize;
+        --dictSize;  //FIXME: index too low if == 2 or 1
         if(dictSize > maxDictSize) {
           dictSize = maxDictSize;
         }
       }      
+    }
+
+    if(compressVersionCurrent > compressVersion.V3) {
+      compressVersionCurrent = compressVersion.V3;
     }
   }
 

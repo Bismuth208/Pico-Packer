@@ -2,7 +2,7 @@
 
 This tool convert and compress indexed (or not) ".png" files
 by simple RLE and tiny dictionary (like LZ family) to ".h" files.
-It was created as comression tool for indexed pictures in my games.
+It was created as compression tool for indexed pictures in my games.
 
 #### Build:
 - YOU NEED to instal dmd compiler for D lang, grab it at https://dlang.org;
@@ -70,9 +70,9 @@ pic_t somePicName[] PROGMEM = {
 ***
 - Author: Antonov Alexander (Bismuth208) 
 - Date: 12 november 2017 
-- Last edit: 19 april 2018
+- Last edit: 22 april 2018
 - Lang: D 
-- Compiler: DMD v2.078.1 
+- Compiler: DMD v2.079.1 
 
 Also, this program use arsd modules (png.d and color.d).
 [Original author and libs are here:](https://github.com/adamdruppe/arsd "Adam D. Ruppe git")
