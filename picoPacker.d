@@ -16,7 +16,7 @@ import arsd.png;
 
 immutable auto infoText = "\nPico Packer. v0.5. Build: " ~ __TIMESTAMP__;
 immutable auto fmtSize = "// Old size %d * 2 = %d\n// New size = %d + 2\n// Compress ratio %f\n";
-immutable auto fmt = "pic_t %s[] PROGMEM = {\n  0x%.2x,0x%.2x, // width and height";
+immutable auto fmt = "pic_t %s[] PROGMEM = {  // -l%d -d%d\n  0x%.2x,0x%.2x, // width and height";
 
 immutable auto minMatchCount = 3;
 immutable auto rleMark = 0x80; /// RLE marker. Show to unpaker where raw data and where compressed data.
@@ -150,7 +150,6 @@ auto encodeMatches(ref ubyte[] buf) {
 /// Make simple RLE compression whith indexed ubyte[]
 auto compressRLE(ref ubyte[] buf) {
   import std.outbuffer, std.algorithm : group;
-  import std.typecons : tuple, Tuple;
 
   auto encodedRLE = new OutBuffer;
   auto dataBuf = new ubyte[2];
@@ -169,7 +168,7 @@ auto compressRLE(ref ubyte[] buf) {
 
     if(rleCount > 2) {
       if(rleCount > maxDataLength) {
-        repeatWrite((rleCount / maxDataLength), maxDataLength-1, tmpByte);
+        repeatWrite((rleCount / maxDataLength), maxDataLength-1, tmpByte); 
         rleCount -= maxDataLength * (rleCount / maxDataLength);
       }
       if(rleCount) { // left something?
@@ -247,7 +246,7 @@ void fillHeader(ref string fileName) {
   pictureSize = dictionaryArr.length + array.data.length;
   
   arrayEnd.writef(fmtSize, bufSize, bufSize*2, pictureSize, cast(float)(bufSize)/cast(float)pictureSize);
-  arrayEnd.writef(fmt, headerName, array.width-1, array.height-1);
+  arrayEnd.writef(fmt, headerName, cast(int)compressVersionCurrent, cast(int)dictionaryArr.length/2, array.width-1, array.height-1);
  
   writeEndArr(dictionaryArr, 16);
   writeEndArr(array.data, 16); // comressed and encoded array
@@ -300,7 +299,6 @@ auto pareArguments(ref string[] args, ref string fileName) {
       if(dictSize == 0) {
         compressVersionCurrent = compressVersion.V1; // only RLE
       } else {
-        --dictSize;  //FIXME: index too low if == 2 or 1
         if(dictSize > maxDictSize) {
           dictSize = maxDictSize;
         }
@@ -309,7 +307,11 @@ auto pareArguments(ref string[] args, ref string fileName) {
 
     if(compressVersionCurrent > compressVersion.V3) {
       compressVersionCurrent = compressVersion.V3;
-    }
+    } else {
+      if(compressVersionCurrent == compressVersion.V1) {
+        dictSize = 0;
+      }
+    }    
   }
 
   return ok;
